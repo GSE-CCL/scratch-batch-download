@@ -1,95 +1,5 @@
 import argparse
-import json
-import io
-import os
-import requests
-import zipfile
-
-import helpers
-
-STUDIO_URL = "https://api.scratch.mit.edu/studios/{0}/projects?limit=40&offset={1}"
-PROJECT_URL = "https://projects.scratch.mit.edu/{0}"
-
-def get_projects_in_studio(id):
-    """Given integer studio ID, return a set of integer project IDs"""
-    offset = 0
-    project_ids = set()
-    while True:
-        url = STUDIO_URL.format(id, offset)
-        r = requests.get(url)
-
-        if r.status_code != 200:
-            raise RuntimeError("GET {0} failed with status code {1}".format(r.status_code, url))
-
-        # No more projects
-        projects = r.json()
-        if len(projects) < 1:
-            break
-        else:
-            for project in projects:
-                project_ids.add(project["id"])
-            offset += 40
-        
-    return project_ids
-
-
-def download_project(id):
-    """Download an individual project and return its Python object"""
-    url = PROJECT_URL.format(id)
-    r = requests.get(url)
-
-    if r.status_code != 200:
-        print("GET {0} failed with status code {1}".format(r.status_code, url))
-
-    project = ""
-    try:
-        project = r.json()
-    except:
-        # In some cases, a binary archive will download -- handle that
-        if json.decoder.JSONDecodeError:
-            try:
-                f = io.BytesIO(r.content)
-                archive = zipfile.ZipFile(f)
-                if "project.json" in archive.namelist():
-                    proj = archive.read("project.json")
-                    project = json.loads(proj.decode("utf-8"))
-            except:
-                print("Cannot handle project {0}".format(id))
-    return project
-
-
-def download_projects(ids, projects_to_studio, output_directory=os.getcwd(), file_name=None):
-    """"Given project IDs, download the JSON files.
-        :param ids: array-like collection of Scratch project IDs
-        :param output_directory: directory for output
-        :param file_name: if blank, creates a separate JSON file
-                          for each project; otherwise, combines
-                          projects into one JSON file with file_name"""
-
-    helpers.make_dir(output_directory)
-    projects = list()
-    for id in ids:
-        project = download_project(id)
-
-        if len(project) < 1:
-            break
-        
-        if file_name is None:
-            od = output_directory
-            if len(projects_to_studio) > 0:
-                od = "{0}/{1}".format(od, projects_to_studio[id])
-                helpers.make_dir(od)
-
-            with open("{0}/{1}.json".format(od, id), "w") as f:
-                json.dump(project, f)
-        else:
-            projects.append(project)
-
-    # If projects has at least one item, we should write to a single file
-    if len(projects) > 0 and file_name is not None:
-        with open("{0}/{1}.json".format(output_directory, file_name), "w") as f:
-            json.dump(projects, f)
-
+from ccl_scratch_scrape import Scraper
 
 def get_arguments():
     parser = argparse.ArgumentParser(description="Download Scratch projects.")
@@ -108,38 +18,24 @@ def get_arguments():
 
     return parser.parse_args()
 
-
-def get_ids_from_file(filename):
-    """Given a filename, return a list of IDs from a newline-separated file. Project/studio link agnostic."""
-    ids = list()
-    try:
-        ids = list()
-        with open(filename) as f:
-            for l in f.readlines():
-                ids.append(helpers.get_id(l))
-    except:
-        pass
-    return ids
-
-
-def get_project_ids(arguments):
+def get_project_ids(scrape, arguments):
     """Given input arguments, return a set of all the project IDs."""
     projects = list()
     projects_to_studio = dict()
     if arguments.project is not None:
         for p in arguments.project:
-            projects.append(helpers.get_id(p))
+            projects.append(scrape.get_id(p))
     elif arguments.studio is not None:
         for s in arguments.studio:
-            projects += get_projects_in_studio(helpers.get_id(s))
+            projects += scrape.get_projects_in_studio(scrape.get_id(s))
     elif arguments.project_list is not None:
         for p in arguments.project_list:
-            projects += get_ids_from_file(p)
+            projects += scrape.get_ids_from_file(p)
     elif arguments.studio_list is not None:
         for s in arguments.studio_list:
-            studios = get_ids_from_file(s)
+            studios = scrape.get_ids_from_file(s)
             for studio in studios:
-                studio_projects = get_projects_in_studio(studio)
+                studio_projects = scrape.get_projects_in_studio(studio)
                 projects += studio_projects
                 if arguments.studio_subdirectories:
                     for p in studio_projects:
@@ -147,15 +43,15 @@ def get_project_ids(arguments):
 
     return set(projects), projects_to_studio
 
-
 def main():
+    scrape = Scraper()
     arguments = get_arguments()
-    projects, projects_to_studio = get_project_ids(arguments)
+    projects, projects_to_studio = get_project_ids(scrape, arguments)
 
     if arguments.output_directory is None:
-        download_projects(projects, projects_to_studio, file_name=arguments.output_name)
+        scrape.download_projects(projects, projects_to_studio, file_name=arguments.output_name)
     else:
-        download_projects(projects, projects_to_studio, output_directory=arguments.output_directory, file_name=arguments.output_name)
+        scrape.download_projects(projects, projects_to_studio, output_directory=arguments.output_directory, file_name=arguments.output_name)
 
 
 if __name__ == "__main__":

@@ -1,1 +1,1 @@
-requests
+ccl-scratch-scrape
