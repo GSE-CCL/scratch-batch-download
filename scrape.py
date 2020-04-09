@@ -1,5 +1,5 @@
 import argparse
-from ccl_scratch_scrape import Scraper
+from ccl_scratch_tools import Scraper
 
 def get_arguments():
     parser = argparse.ArgumentParser(description="Download Scratch projects.")
